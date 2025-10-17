@@ -31,7 +31,7 @@ def build_json_schema(allowed_codes: Dict) -> Dict:
                 "rationale": {"type": "string"},
                 "mapping_category": {
                     "type": "string",
-                    "enum": ["NONE", "CLOSE_MATCH", "OTHER_MATCH"],
+                    "enum": ["NONE", "CLOSE_MATCH", "OTHER_MATCH", "MULTI_MAP"],
                 },
                 "match_specificity": {
                     "type": "string",
@@ -41,6 +41,20 @@ def build_json_schema(allowed_codes: Dict) -> Dict:
                     "type": "string",
                     "enum": ["MULTIMAP", "BAD_MAPPING", "N/A"],
                 },
+                "more_broad_icd10_code": {
+                    "anyOf": [
+                        {"type": "string", "enum": code_enum},
+                        {"type": "null"},
+                    ]
+                },
+                "more_broad_icd10_name": {"type": ["string", "null"]},
+                "closest_exact_icd10_code": {
+                    "anyOf": [
+                        {"type": "string", "enum": code_enum},
+                        {"type": "null"},
+                    ]
+                },
+                "closest_exact_icd10_name": {"type": ["string", "null"]},
             },
             "required": [
                 "best_match_icd10_code",
@@ -72,27 +86,39 @@ def build_messages(record: MappingRecord, allowed: List[CandidateOption]) -> Tup
 
     system = (
         "You are a meticulous medical coding assistant."
-        " Your task is to choose the single best ICD10 code from the ALLOWED_CANDIDATES list only."
+        " Your task is to map ICD9 codes to ICD10 codes from the ALLOWED_CANDIDATES list only."
         " Never invent codes or names."
         " If no confident match exists, set best_match_icd10_code and best_match_icd10_name to null and set confidence to 'no_confident_match'."
         "\n\nMatching rules:" 
         "\n1) Prefer a candidate from DIRECT mappings if any are suitable; otherwise choose from retrieved/universe."
         "\n2) If no exact match exists, prefer a more broad term that fully covers the ICD9 concept over picking a too-narrow subset."
-        "\n3) In multi-map situations where the ICD9 concept spans multiple specific ICD10 codes, select a more broad ICD10 that encompasses all parts when possible."
-        " If no such broader concept exists, choose the most clinically prevalent/salient specific option."
-        "\n3a) If laterality is not given in the ICD9 input, prefer an 'unspecified side' ICD10 over left/right variants of otherwise identical phrasing."
-        "\n4) Do not hallucinate. Only choose codes from ALLOWED_CANDIDATES."
-        "\n5) Classify confidence as strong/medium/weak based on textual alignment and inclusivity."
+        "\n3) **MULTI-MAP DETECTION**: Some ICD9 codes represent COMPOSITE conditions that map to multiple distinct ICD10 codes."
+        " Examples: 'Streptococcal sore throat and scarlet fever' (two separate diseases), 'Viral and chlamydial infections' (two organism types),"
+        " 'Acute and chronic viral hepatitis' (two temporal categories)."
+        "\n3a) If the ICD9 name contains AND/OR between distinct conditions, or spans multiple categories that have separate ICD10 codes, this is a MULTI-MAP situation."
+        "\n3b) For MULTI-MAP cases:"
+        " - Set mapping_category to 'MULTI_MAP'"
+        " - In best_match_icd10_code, select the MORE BROAD code that encompasses all parts (if one exists in candidates)"
+        " - Populate more_broad_icd10_code and more_broad_icd10_name with the broader encompassing code"
+        " - Populate closest_exact_icd10_code and closest_exact_icd10_name with the most clinically salient specific code"
+        " - If no broad encompassing code exists, put the most salient specific code in best_match_icd10_code"
+        "\n4) If laterality is not given in the ICD9 input, prefer an 'unspecified side' ICD10 over left/right variants of otherwise identical phrasing."
+        "\n5) Do not hallucinate. Only choose codes from ALLOWED_CANDIDATES."
+        "\n6) Classify confidence as strong/medium/weak based on textual alignment and inclusivity."
         " If you return a code, confidence must be one of strong/medium/weak. Only use 'no_confident_match' when you return null."
-        "\n6) Set mapping_category to: 'CLOSE_MATCH' if chosen from DIRECT candidates; 'OTHER_MATCH' if chosen from retrieved/universe; 'NONE' if nothing was chosen."
-        "\n7) Set match_specificity to EXACT/CLOSE/MORE_BROAD based on semantic relation."
-        "\n8) If you chose outside DIRECT candidates (and DIRECT exists), set external_choice_reason to:"
-        " 'MULTIMAP' if the ICD9 spans multiple specific ICD10s and you selected a broader concept; otherwise 'BAD_MAPPING'."
+        "\n7) Set mapping_category to:"
+        " - 'MULTI_MAP' if ICD9 spans multiple distinct ICD10 concepts"
+        " - 'CLOSE_MATCH' if chosen from DIRECT candidates"
+        " - 'OTHER_MATCH' if chosen from retrieved/universe"
+        " - 'NONE' if nothing was chosen."
+        "\n8) Set match_specificity to EXACT/CLOSE/MORE_BROAD based on semantic relation."
+        "\n9) If you chose outside DIRECT candidates (and DIRECT exists), set external_choice_reason to:"
+        " 'MULTIMAP' if the ICD9 spans multiple specific ICD10s; otherwise 'BAD_MAPPING'."
         " If no DIRECT candidates exist or you selected from DIRECT, set 'N/A'."
-        "\n9) IMPORTANT: The field best_match_icd10_code must be exactly one of the allowed code strings provided—no variations or partials."
-        "\n10) Include all required fields exactly as specified; provide a concise 1-3 sentence rationale."
-        "\n\nExample JSON shape to follow (values are placeholders):\n"
-        '{"best_match_icd10_code":"CODE_OR_NULL","best_match_icd10_name":"NAME_OR_NULL","confidence":"strong|medium|weak|no_confident_match","rationale":"why this is the best mapping","mapping_category":"CLOSE_MATCH|OTHER_MATCH|NONE","match_specificity":"EXACT|CLOSE|MORE_BROAD","external_choice_reason":"MULTIMAP|BAD_MAPPING|N/A"}'
+        "\n10) IMPORTANT: All code fields must be exactly one of the allowed code strings provided—no variations or partials."
+        "\n11) Include all required fields exactly as specified; provide a concise 1-3 sentence rationale explaining your choice and why it's multi-map if applicable."
+        "\n\nExample JSON for MULTI-MAP:\n"
+        '{"best_match_icd10_code":"B19","best_match_icd10_name":"Unspecified viral hepatitis","confidence":"medium","rationale":"ICD9 070 spans acute, chronic, and unspecified hepatitis; B19 is the broadest unspecified category","mapping_category":"MULTI_MAP","match_specificity":"MORE_BROAD","external_choice_reason":"N/A","more_broad_icd10_code":"B19","more_broad_icd10_name":"Unspecified viral hepatitis","closest_exact_icd10_code":"B17.9","closest_exact_icd10_name":"Acute viral hepatitis, unspecified"}'
         "\n\nReturn ONLY a JSON object matching the provided JSON schema."
     )
 

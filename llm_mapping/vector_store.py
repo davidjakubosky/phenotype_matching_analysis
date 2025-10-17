@@ -179,6 +179,49 @@ class Icd10VectorStore:
             code = self.row_to_code[j]
             out.append((code, float(score)))
         return out
+    
+    def search_multi_query(
+        self, 
+        queries: List[str], 
+        top_k: int = 50
+    ) -> List[Tuple[str, float]]:
+        """
+        Perform multi-query retrieval with max-score merging.
+        
+        For each query:
+        1. Embed the query text
+        2. Search the FAISS index for top-k matches
+        3. Collect all results
+        
+        Then merge results by taking the MAXIMUM score for each code across all queries,
+        and return the top-k highest scoring codes from the merged results.
+        
+        Args:
+            queries: List of query strings to search for
+            top_k: Number of top results to retrieve per query AND return in final merged results
+        
+        Returns:
+            Merged list of (code, max_score) tuples, limited to top_k, sorted by score descending
+        """
+        if self.index is None:
+            raise RuntimeError("Index not built or loaded.")
+        
+        if not queries:
+            return []
+        
+        # Collect results from each query
+        best_scores: Dict[str, float] = {}
+        
+        for query in queries:
+            results = self.search(query, top_k=top_k)
+            for code, score in results:
+                # Take maximum score across all queries
+                if code not in best_scores or score > best_scores[code]:
+                    best_scores[code] = score
+        
+        # Sort by score descending and limit to top_k
+        merged = sorted(best_scores.items(), key=lambda kv: kv[1], reverse=True)
+        return merged[:top_k]
 
 
 def _cli_build():

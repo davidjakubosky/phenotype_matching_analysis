@@ -44,7 +44,7 @@ class MappingRecord:
 
 
 Confidence = Literal["strong", "medium", "weak", "no_confident_match"]
-MappingCategory = Literal["NONE", "CLOSE_MATCH", "OTHER_MATCH"]
+MappingCategory = Literal["NONE", "CLOSE_MATCH", "OTHER_MATCH", "MULTI_MAP"]
 Specificity = Literal["EXACT", "CLOSE", "MORE_BROAD"]
 ExternalChoiceReason = Literal["MULTIMAP", "BAD_MAPPING", "N/A"]
 
@@ -58,6 +58,11 @@ class LlmMappingResponse:
     mapping_category: MappingCategory
     match_specificity: Specificity
     external_choice_reason: ExternalChoiceReason
+    # Multi-map support: populated only when mapping_category is "MULTI_MAP"
+    more_broad_icd10_code: Optional[str] = None
+    more_broad_icd10_name: Optional[str] = None
+    closest_exact_icd10_code: Optional[str] = None
+    closest_exact_icd10_name: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -93,6 +98,11 @@ class MappingResult:
     attempted_returned_code: Optional[str] = None
     attempted_returned_name: Optional[str] = None
     salvage_strategy: Optional[str] = None  # e.g., "corrected_confidence", "accepted_valid_code"
+    # Multi-map support: when ICD9 maps to multiple ICD10 codes
+    more_broad_icd10_code: Optional[str] = None
+    more_broad_icd10_name: Optional[str] = None
+    closest_exact_icd10_code: Optional[str] = None
+    closest_exact_icd10_name: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         result = asdict(self)
@@ -152,6 +162,18 @@ class VectorStoreConfig:
     openai_embedding_model: str = "text-embedding-3-small"
     normalize_embeddings: bool = True
 
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class MapperConfig:
+    """Configuration for the ICD9→ICD10 mapping process."""
+    retrieve_top_k: int = 40
+    max_llm_attempts: int = 2
+    enable_synonym_expansion: bool = False
+    synonym_top_k: int = 40  # top_k per query when using synonym expansion
+    
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 

@@ -13,10 +13,12 @@ from .schemas import (
     MappingAudit,
     AttemptAudit,
     PromptMessage,
+    MapperConfig,
 )
 from .vector_store import Icd10VectorStore
 from .prompt_builder import build_messages
 from .llm_client import LlmJSONClient, LlmError, LlmValidationError
+from .synonym_expander import generate_synonyms, build_query_variants
 
 
 def _merge_candidates(record: MappingRecord, store: Icd10VectorStore, retrieved: List[Tuple[str, float]]) -> List[CandidateOption]:
@@ -60,11 +62,37 @@ async def map_one(
     record: MappingRecord,
     store: Icd10VectorStore,
     client: LlmJSONClient,
-    retrieve_top_k: int = 40,
-    max_llm_attempts: int = 2,
+    config: Optional[MapperConfig] = None,
+    retrieve_top_k: Optional[int] = None,  # deprecated, use config
+    max_llm_attempts: Optional[int] = None,  # deprecated, use config
     audit: bool = False,
 ) -> MappingResult:
-    retrieved = store.search(_query_text(record), top_k=retrieve_top_k)
+    # Handle config with backwards compatibility
+    if config is None:
+        config = MapperConfig(
+            retrieve_top_k=retrieve_top_k or 40,
+            max_llm_attempts=max_llm_attempts or 2,
+            enable_synonym_expansion=False,
+        )
+    
+    # STEP 1: Retrieve candidates (with optional synonym expansion)
+    if config.enable_synonym_expansion:
+        # Generate synonyms using LLM
+        synonyms = await generate_synonyms(
+            client,
+            record.icd9_code,
+            record.icd9_name
+        )
+        
+        # Build query variants (original + synonyms)
+        queries = build_query_variants(record.icd9_name, synonyms, include_original=True)
+        
+        # Multi-query search with max-score merging
+        retrieved = store.search_multi_query(queries, top_k=config.synonym_top_k)
+    else:
+        # Standard single-query search
+        retrieved = store.search(_query_text(record), top_k=config.retrieve_top_k)
+    
     allowed = _merge_candidates(record, store, retrieved)
 
     messages, schema = build_messages(record, allowed)
@@ -75,7 +103,7 @@ async def map_one(
     last_attempted_code: Optional[str] = None
     last_attempted_name: Optional[str] = None
 
-    for attempt in range(max_llm_attempts):
+    for attempt in range(config.max_llm_attempts):
         try:
             resp, raw_text = await client.create_and_validate(messages, schema, lambda d: LlmMappingResponse(**d))
             if audit_log is not None:
@@ -211,6 +239,22 @@ async def map_one(
             if "invalid" in resp.rationale.lower() or "error" in resp.rationale.lower():
                 final_rationale = f"Code selected but with low confidence due to contradictory LLM output"
 
+        # Extract multi-map fields if present
+        more_broad_code = getattr(resp, 'more_broad_icd10_code', None)
+        more_broad_name = getattr(resp, 'more_broad_icd10_name', None)
+        closest_exact_code = getattr(resp, 'closest_exact_icd10_code', None)
+        closest_exact_name = getattr(resp, 'closest_exact_icd10_name', None)
+        
+        # Normalize multi-map names to canonical store names
+        if more_broad_code and store.exists(more_broad_code):
+            more_broad_entry = store.get_entry(more_broad_code)
+            if more_broad_entry:
+                more_broad_name = more_broad_entry.name
+        if closest_exact_code and store.exists(closest_exact_code):
+            closest_exact_entry = store.get_entry(closest_exact_code)
+            if closest_exact_entry:
+                closest_exact_name = closest_exact_entry.name
+        
         base = MappingResult(
             input=record,
             selected_code=chosen_code,
@@ -228,6 +272,10 @@ async def map_one(
             attempted_returned_code=last_attempted_code,
             attempted_returned_name=last_attempted_name,
             salvage_strategy=salvage_strategy_text,
+            more_broad_icd10_code=more_broad_code,
+            more_broad_icd10_name=more_broad_name,
+            closest_exact_icd10_code=closest_exact_code,
+            closest_exact_icd10_name=closest_exact_name,
         )
         if audit_log is not None:
             return MappingResultWithAudit(**base.to_dict(), audit=audit_log)
@@ -273,7 +321,7 @@ async def map_one(
         allowed_candidates=_merge_candidates(record, store, retrieved),
         retrieved_top_k=len(retrieved),
         validator_notes="LLM attempts exhausted",
-        num_attempts=max_llm_attempts,
+        num_attempts=config.max_llm_attempts,
         attempted_returned_code=last_attempted_code,
         attempted_returned_name=last_attempted_name,
         salvage_strategy=(

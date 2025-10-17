@@ -10,7 +10,7 @@ from typing import List, Optional
 import pandas as pd
 
 from .vector_store import Icd10VectorStore, VectorStoreConfig
-from .schemas import MappingRecord, DirectCandidate, MappingResultWithAudit, MappingResult
+from .schemas import MappingRecord, DirectCandidate, MappingResultWithAudit, MappingResult, MapperConfig
 from .mapper import map_one
 from .llm_client import LlmJSONClient
 
@@ -53,7 +53,8 @@ def parse_potential_matches(cell: Optional[str]) -> List[DirectCandidate]:
 
 
 def load_input_records(path: str, limit: Optional[int]) -> List[MappingRecord]:
-    df = pd.read_csv(path, sep="\t")
+    # Read with icd9_code as string to preserve leading zeros (e.g., "099")
+    df = pd.read_csv(path, sep="\t", dtype={'icd9_code': str})
     if limit is not None:
         df = df.head(limit)
     recs: List[MappingRecord] = []
@@ -80,10 +81,20 @@ async def run_all(
     audit_path: Optional[str],
     limit: Optional[int],
     icd10_store: Optional[str],
+    enable_synonym_expansion: bool = False,
+    synonym_top_k: int = 40,
 ) -> List[MappingResult]:
     # Prepare store
     store_dir = icd10_store if icd10_store else os.path.join(out_dir, "icd10_index")
     store = build_store_if_needed(icd10_universe_tsv, store_dir)
+
+    # Build mapper configuration
+    mapper_config = MapperConfig(
+        retrieve_top_k=retrieve_top_k,
+        max_llm_attempts=max_llm_attempts,
+        enable_synonym_expansion=enable_synonym_expansion,
+        synonym_top_k=synonym_top_k,
+    )
 
     # Load input
     records = load_input_records(icd9_input_tsv, limit=limit)
@@ -98,8 +109,7 @@ async def run_all(
                 rec,
                 store,
                 client,
-                retrieve_top_k=retrieve_top_k,
-                max_llm_attempts=max_llm_attempts,
+                config=mapper_config,
                 audit=do_audit,
             )
             results.append(res)
@@ -131,6 +141,10 @@ async def run_all(
                 "attempted_returned_code": getattr(r, "attempted_returned_code", None),
                 "attempted_returned_name": getattr(r, "attempted_returned_name", None),
                 "salvage_strategy": getattr(r, "salvage_strategy", None),
+                "more_broad_icd10_code": getattr(r, "more_broad_icd10_code", None),
+                "more_broad_icd10_name": getattr(r, "more_broad_icd10_name", None),
+                "closest_exact_icd10_code": getattr(r, "closest_exact_icd10_code", None),
+                "closest_exact_icd10_name": getattr(r, "closest_exact_icd10_name", None),
             }
         )
     pd.DataFrame(rows).to_csv(csv_path, index=False)
@@ -158,6 +172,10 @@ def main():
     parser.add_argument("--max-llm-attempts", type=int, default=2)
     parser.add_argument("--audit-jsonl", default=None, help="Optional audits JSONL path")
     parser.add_argument("--limit", type=int, default=None, help="Optional row limit (omit to run all)")
+    parser.add_argument("--enable-synonym-expansion", action="store_true", 
+                        help="Enable LLM-based synonym expansion for improved retrieval")
+    parser.add_argument("--synonym-top-k", type=int, default=40,
+                        help="Top-k per query when using synonym expansion (default: 40)")
     args = parser.parse_args()
 
     run_name = args.run_name or datetime.now().strftime("run_%Y%m%d_%H%M%S")
@@ -175,6 +193,8 @@ def main():
             audit_path=args.audit_jsonl,
             limit=args.limit,
             icd10_store=args.icd10_store,
+            enable_synonym_expansion=args.enable_synonym_expansion,
+            synonym_top_k=args.synonym_top_k,
         )
     )
 
