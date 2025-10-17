@@ -1,0 +1,1 @@
+{"backend": "faiss", "embedding": "local", "local_model_name": "sentence-transformers/all-MiniLM-L6-v2", "openai_embedding_model": "text-embedding-3-small", "normalize_embeddings": true}
