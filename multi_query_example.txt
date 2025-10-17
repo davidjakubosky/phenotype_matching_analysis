@@ -1,0 +1,130 @@
+================================================================================
+MULTI-QUERY STRATEGY: STEP-BY-STEP EXAMPLE WITH REAL DATA
+================================================================================
+
+INPUT:
+  ICD9 Code: 099
+  ICD9 Name: "Other venereal diseases"
+
+STEP 1: GENERATE QUERIES
+================================================================================
+Trigger: Detected "venereal" in ICD9 name
+Generated 6 separate query strings:
+
+  Query 1: "Other venereal diseases"
+  Query 2: "sexually transmitted disease" 
+  Query 3: "sexually transmitted infection"
+  Query 4: "STD"
+  Query 5: "STI"
+  Query 6: "unspecified sexually transmitted disease"
+
+STEP 2: EXECUTE EACH QUERY INDEPENDENTLY
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Query 1: "Other venereal diseases"                                      │
+├─────────────────────────────────────────────────────────────────────────┤
+│ [Embedding Model] → 384-dim vector: [0.023, -0.041, 0.089, ...]       │
+│ [FAISS Search] → Compare against 46,881 ICD10 codes                    │
+│                                                                         │
+│ Top-10 Results:                                                         │
+│   1. A56  → 0.5716  (Other sexually transmitted chlamydial diseases)   │
+│   2. A63  → 0.5617  (Other predominantly sexually transmitted...)      │
+│   3. A638 → 0.5486  (Other specified predominantly sexually...)        │
+│   4. Z87438→0.5261  (Personal history of other diseases...)           │
+│   5. A64  → 0.4821  ← Target appears but with lower score             │
+│   ...                                                                   │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Query 2: "sexually transmitted disease"                                 │
+├─────────────────────────────────────────────────────────────────────────┤
+│ [Embedding Model] → 384-dim vector: [0.031, -0.029, 0.071, ...]       │
+│ [FAISS Search] → Compare against 46,881 ICD10 codes                    │
+│                                                                         │
+│ Top-10 Results:                                                         │
+│   1. A64  → 0.7899  ← TARGET: Near-perfect match! ⭐                   │
+│   2. A56  → 0.6234  (Other sexually transmitted chlamydial diseases)   │
+│   3. A638 → 0.6103  (Other specified predominantly sexually...)        │
+│   4. A63  → 0.5998  (Other predominantly sexually transmitted...)      │
+│   5. O9831→ 0.5892  (Other infections with predominantly sexual...)    │
+│   ...                                                                   │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Query 3: "sexually transmitted infection"                               │
+├─────────────────────────────────────────────────────────────────────────┤
+│ Top-10 Results:                                                         │
+│   1. A64  → 0.7654  ← Target still ranks high                         │
+│   2. A56  → 0.6512                                                     │
+│   ...                                                                   │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Query 4-6: "STD", "STI", "unspecified sexually transmitted disease"    │
+├─────────────────────────────────────────────────────────────────────────┤
+│ Similar results with varying scores for A64 and other codes            │
+└─────────────────────────────────────────────────────────────────────────┘
+
+
+STEP 3: MERGE RESULTS BY MAXIMUM SCORE
+================================================================================
+
+For each ICD10 code that appeared in ANY query result, take the MAXIMUM score:
+
+Code A64 appeared in multiple queries:
+  Query 1: A64 → 0.4821
+  Query 2: A64 → 0.7899  ← MAXIMUM
+  Query 3: A64 → 0.7654
+  Query 4: A64 → 0.6892
+  Query 5: A64 → 0.7234
+  Query 6: A64 → 0.8012
+
+Final score for A64 = max(0.4821, 0.7899, 0.7654, 0.6892, 0.7234, 0.8012) 
+                    = 0.7899
+
+Code A56 appeared in multiple queries:
+  Query 1: A56 → 0.5716  ← MAXIMUM
+  Query 2: A56 → 0.6234
+  Query 3: A56 → 0.6512
+  ...
+  
+Final score for A56 = max(...) = 0.6731
+
+... repeat for all codes that appeared ...
+
+
+STEP 4: RE-SORT BY FINAL SCORES
+================================================================================
+
+Merged and sorted final results:
+
+  Rank  Code   Final Score  Name
+  ────  ─────  ───────────  ────────────────────────────────────────────
+   1    A64    0.7899       Unspecified sexually transmitted disease ⭐
+   2    A56    0.6731       Other sexually transmitted chlamydial diseases
+   3    A638   0.6604       Other specified predominantly sexually transmitted
+   4    A63    0.6469       Other predominantly sexually transmitted diseases
+   5    O9831  0.6282       Other infections with predominantly sexual mode...
+   ...
+
+
+FINAL OUTPUT:
+================================================================================
+✅ A64 found at RANK 1 with confidence score 0.7899
+
+This is passed to the LLM as the top candidate, and the LLM correctly selects it.
+
+
+KEY INSIGHT:
+================================================================================
+Without multi-query:
+  - Single query "Other venereal diseases" → A64 scores ~0.48 (not in top-40)
+  
+With multi-query:
+  - Query "sexually transmitted disease" → A64 scores 0.7899 (rank 1!)
+  - The best query "wins" and brings A64 to the top
+  
+The multi-query approach ensures that if ANY synonym/paraphrase matches well,
+the target code will be retrieved with a high score.
+
