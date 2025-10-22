@@ -31,7 +31,11 @@ def build_json_schema(allowed_codes: Dict) -> Dict:
                 "rationale": {"type": "string"},
                 "mapping_category": {
                     "type": "string",
-                    "enum": ["NONE", "CLOSE_MATCH", "OTHER_MATCH", "MULTI_MAP"],
+                    "enum": ["NONE", "DIRECT_MATCH", "OTHER_MATCH"],
+                },
+                "is_multi_map": {
+                    "type": "boolean",
+                    "description": "True if ICD9 spans multiple distinct ICD10 concepts"
                 },
                 "match_specificity": {
                     "type": "string",
@@ -64,6 +68,7 @@ def build_json_schema(allowed_codes: Dict) -> Dict:
                 "mapping_category",
                 "match_specificity",
                 "external_choice_reason",
+                "is_multi_map",
             ],
             # Keep schema simple to avoid model omissions; enforce remaining rules in instructions/validator
         },
@@ -92,33 +97,32 @@ def build_messages(record: MappingRecord, allowed: List[CandidateOption]) -> Tup
         "\n\nMatching rules:" 
         "\n1) Prefer a candidate from DIRECT mappings if any are suitable; otherwise choose from retrieved/universe."
         "\n2) If no exact match exists, prefer a more broad term that fully covers the ICD9 concept over picking a too-narrow subset."
-        "\n3) **MULTI-MAP DETECTION**: Some ICD9 codes represent COMPOSITE conditions that map to multiple distinct ICD10 codes."
+        "\n3) **MULTI-MAP DETECTION**: Set is_multi_map=true if the ICD9 code represents COMPOSITE conditions that map to multiple distinct ICD10 codes."
         " Examples: 'Streptococcal sore throat and scarlet fever' (two separate diseases), 'Viral and chlamydial infections' (two organism types),"
         " 'Acute and chronic viral hepatitis' (two temporal categories)."
-        "\n3a) If the ICD9 name contains AND/OR between distinct conditions, or spans multiple categories that have separate ICD10 codes, this is a MULTI-MAP situation."
-        "\n3b) For MULTI-MAP cases:"
-        " - Set mapping_category to 'MULTI_MAP'"
+        "\n3a) Detect MULTI-MAP when: ICD9 name contains AND/OR between distinct conditions, or spans multiple categories that have separate ICD10 codes."
+        "\n3b) For MULTI-MAP cases (is_multi_map=true):"
         " - In best_match_icd10_code, select the MORE BROAD code that encompasses all parts (if one exists in candidates)"
         " - Populate more_broad_icd10_code and more_broad_icd10_name with the broader encompassing code"
         " - Populate closest_exact_icd10_code and closest_exact_icd10_name with the most clinically salient specific code"
         " - If no broad encompassing code exists, put the most salient specific code in best_match_icd10_code"
+        "\n3c) For NON-MULTI-MAP cases (is_multi_map=false): Leave more_broad and closest_exact fields null."
         "\n4) If laterality is not given in the ICD9 input, prefer an 'unspecified side' ICD10 over left/right variants of otherwise identical phrasing."
         "\n5) Do not hallucinate. Only choose codes from ALLOWED_CANDIDATES."
         "\n6) Classify confidence as strong/medium/weak based on textual alignment and inclusivity."
         " If you return a code, confidence must be one of strong/medium/weak. Only use 'no_confident_match' when you return null."
         "\n7) Set mapping_category to:"
-        " - 'MULTI_MAP' if ICD9 spans multiple distinct ICD10 concepts"
-        " - 'CLOSE_MATCH' if chosen from DIRECT candidates"
+        " - 'DIRECT_MATCH' if chosen from DIRECT candidates"
         " - 'OTHER_MATCH' if chosen from retrieved/universe"
         " - 'NONE' if nothing was chosen."
         "\n8) Set match_specificity to EXACT/CLOSE/MORE_BROAD based on semantic relation."
         "\n9) If you chose outside DIRECT candidates (and DIRECT exists), set external_choice_reason to:"
-        " 'MULTIMAP' if the ICD9 spans multiple specific ICD10s; otherwise 'BAD_MAPPING'."
+        " 'MULTIMAP' if the ICD9 spans multiple specific ICD10s (is_multi_map=true); otherwise 'BAD_MAPPING'."
         " If no DIRECT candidates exist or you selected from DIRECT, set 'N/A'."
         "\n10) IMPORTANT: All code fields must be exactly one of the allowed code strings provided—no variations or partials."
         "\n11) Include all required fields exactly as specified; provide a concise 1-3 sentence rationale explaining your choice and why it's multi-map if applicable."
         "\n\nExample JSON for MULTI-MAP:\n"
-        '{"best_match_icd10_code":"B19","best_match_icd10_name":"Unspecified viral hepatitis","confidence":"medium","rationale":"ICD9 070 spans acute, chronic, and unspecified hepatitis; B19 is the broadest unspecified category","mapping_category":"MULTI_MAP","match_specificity":"MORE_BROAD","external_choice_reason":"N/A","more_broad_icd10_code":"B19","more_broad_icd10_name":"Unspecified viral hepatitis","closest_exact_icd10_code":"B17.9","closest_exact_icd10_name":"Acute viral hepatitis, unspecified"}'
+        '{"best_match_icd10_code":"B19","best_match_icd10_name":"Unspecified viral hepatitis","confidence":"medium","rationale":"ICD9 070 spans acute, chronic, and unspecified hepatitis which are separate ICD10 categories; B19 is the broadest unspecified category","mapping_category":"OTHER_MATCH","match_specificity":"MORE_BROAD","external_choice_reason":"MULTIMAP","is_multi_map":true,"more_broad_icd10_code":"B19","more_broad_icd10_name":"Unspecified viral hepatitis","closest_exact_icd10_code":"B17.9","closest_exact_icd10_name":"Acute viral hepatitis, unspecified"}'
         "\n\nReturn ONLY a JSON object matching the provided JSON schema."
     )
 

@@ -214,7 +214,7 @@ async def map_one(
 
         # Determine mapping category (chosen_source already computed)
         if any(dc.code == chosen_code for dc in record.direct_candidates):
-            mapping_category = "CLOSE_MATCH"
+            mapping_category = "DIRECT_MATCH"
         else:
             mapping_category = "OTHER_MATCH" if chosen_code is not None else "NONE"
 
@@ -240,6 +240,7 @@ async def map_one(
                 final_rationale = f"Code selected but with low confidence due to contradictory LLM output"
 
         # Extract multi-map fields if present
+        is_multi_map = getattr(resp, 'is_multi_map', False)
         more_broad_code = getattr(resp, 'more_broad_icd10_code', None)
         more_broad_name = getattr(resp, 'more_broad_icd10_name', None)
         closest_exact_code = getattr(resp, 'closest_exact_icd10_code', None)
@@ -272,6 +273,7 @@ async def map_one(
             attempted_returned_code=last_attempted_code,
             attempted_returned_name=last_attempted_name,
             salvage_strategy=salvage_strategy_text,
+            is_multi_map=is_multi_map,
             more_broad_icd10_code=more_broad_code,
             more_broad_icd10_name=more_broad_name,
             closest_exact_icd10_code=closest_exact_code,
@@ -314,7 +316,7 @@ async def map_one(
         selected_name=fallback_name,
         confidence="no_confident_match",
         rationale=(last_error or "Unable to obtain valid selection"),
-        mapping_category=("CLOSE_MATCH" if fallback_code and any(dc.code == fallback_code for dc in record.direct_candidates) else ("OTHER_MATCH" if fallback_code else "NONE")),
+        mapping_category=("DIRECT_MATCH" if fallback_code and any(dc.code == fallback_code for dc in record.direct_candidates) else ("OTHER_MATCH" if fallback_code else "NONE")),
         match_specificity="MORE_BROAD",
         external_choice_reason="N/A",
         chosen_source=("direct" if fallback_code and any(dc.code == fallback_code for dc in record.direct_candidates) else ("retrieved" if fallback_code else None)),

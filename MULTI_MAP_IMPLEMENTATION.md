@@ -32,7 +32,8 @@ Many ICD9 codes represent composite conditions that should map to multiple ICD10
 
 #### New Fields in `MappingResult`
 ```python
-mapping_category: Literal["NONE", "CLOSE_MATCH", "OTHER_MATCH", "MULTI_MAP"]
+mapping_category: Literal["NONE", "DIRECT_MATCH", "OTHER_MATCH"]  # Simplified!
+is_multi_map: bool = False  # NEW separate field for multi-map detection
 more_broad_icd10_code: Optional[str] = None
 more_broad_icd10_name: Optional[str] = None
 closest_exact_icd10_code: Optional[str] = None
@@ -40,10 +41,11 @@ closest_exact_icd10_name: Optional[str] = None
 ```
 
 #### Logic
-- **`mapping_category = "MULTI_MAP"`**: Indicates composite ICD9
+- **`is_multi_map = True`**: Indicates composite ICD9 (separate boolean field for clarity)
+- **`mapping_category`**: Simplified to DIRECT_MATCH (from direct list) or OTHER_MATCH (from retrieval)
 - **`selected_code`**: Contains `more_broad_icd10_code` (the broader encompassing code)
-- **`more_broad_icd10_code`**: Broadest code that covers all concepts
-- **`closest_exact_icd10_code`**: Most clinically salient specific code
+- **`more_broad_icd10_code`**: Broadest code that covers all concepts (when is_multi_map=True)
+- **`closest_exact_icd10_code`**: Most clinically salient specific code (when is_multi_map=True)
 
 ---
 
@@ -81,10 +83,11 @@ The LLM is instructed to detect MULTI-MAP when:
   "best_match_icd10_code": "B19",
   "best_match_icd10_name": "Unspecified viral hepatitis",
   "confidence": "medium",
-  "rationale": "ICD9 070 spans acute, chronic, and unspecified hepatitis; B19 is the broadest unspecified category",
-  "mapping_category": "MULTI_MAP",
+  "rationale": "ICD9 070 spans acute, chronic, and unspecified hepatitis which are separate ICD10 categories; B19 is the broadest unspecified category",
+  "mapping_category": "OTHER_MATCH",
   "match_specificity": "MORE_BROAD",
-  "external_choice_reason": "N/A",
+  "external_choice_reason": "MULTIMAP",
+  "is_multi_map": true,
   "more_broad_icd10_code": "B19",
   "more_broad_icd10_name": "Unspecified viral hepatitis",
   "closest_exact_icd10_code": "B17.9",
@@ -105,7 +108,8 @@ The CSV now includes additional columns:
 | `selected_code` | Primary ICD10 code (= `more_broad_icd10_code` for MULTI-MAP) |
 | `selected_name` | Primary ICD10 name |
 | `confidence` | strong/medium/weak/no_confident_match |
-| `mapping_category` | NONE/CLOSE_MATCH/OTHER_MATCH/**MULTI_MAP** |
+| `mapping_category` | NONE/DIRECT_MATCH/OTHER_MATCH (simplified) |
+| `is_multi_map` | **NEW**: true/false - indicates composite ICD9 |
 | `more_broad_icd10_code` | **NEW**: Broader encompassing code (MULTI-MAP only) |
 | `more_broad_icd10_name` | **NEW**: Name of broader code |
 | `closest_exact_icd10_code` | **NEW**: Most specific salient code (MULTI-MAP only) |
@@ -160,7 +164,7 @@ Filter for MULTI-MAP cases in output:
 import pandas as pd
 
 df = pd.read_csv("output/test_multimap.csv")
-multi_maps = df[df['mapping_category'] == 'MULTI_MAP']
+multi_maps = df[df['is_multi_map'] == True]
 
 for _, row in multi_maps.iterrows():
     print(f"ICD9: {row['icd9_code']} | {row['icd9_name']}")
@@ -205,12 +209,13 @@ Based on your examples, these should be detected as MULTI-MAP:
 
 ## Summary
 
-✅ **MULTI-MAP category added** to schema  
+✅ **is_multi_map boolean field** added as separate column (clearer logic!)  
+✅ **mapping_category simplified** to DIRECT_MATCH/OTHER_MATCH/NONE  
 ✅ **Dual output fields** (broad + exact) implemented  
-✅ **LLM instructions** updated with detection criteria and examples  
-✅ **CSV output** includes new columns  
+✅ **LLM instructions** updated with is_multi_map detection criteria  
+✅ **CSV output** includes is_multi_map + 4 multi-map columns  
 ✅ **Zero linting errors**  
 ✅ **Backward compatible** - existing code unaffected
 
-**Status**: Ready to test on first 40 records to validate detection 🚀
+**Status**: Ready to test - clearer schema should improve LLM detection! 🚀
 

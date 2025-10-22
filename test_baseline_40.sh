@@ -15,7 +15,7 @@ python -m llm_mapping.run_from_tsv \
   --concurrency 12 \
   --retrieve-top-k 40 \
   --max-llm-attempts 2 \
-  --limit 40
+  --limit 200
 
 echo ""
 echo "Baseline test complete!"

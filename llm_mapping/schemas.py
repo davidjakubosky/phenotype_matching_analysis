@@ -44,7 +44,7 @@ class MappingRecord:
 
 
 Confidence = Literal["strong", "medium", "weak", "no_confident_match"]
-MappingCategory = Literal["NONE", "CLOSE_MATCH", "OTHER_MATCH", "MULTI_MAP"]
+MappingCategory = Literal["NONE", "DIRECT_MATCH", "OTHER_MATCH"]
 Specificity = Literal["EXACT", "CLOSE", "MORE_BROAD"]
 ExternalChoiceReason = Literal["MULTIMAP", "BAD_MAPPING", "N/A"]
 
@@ -58,7 +58,8 @@ class LlmMappingResponse:
     mapping_category: MappingCategory
     match_specificity: Specificity
     external_choice_reason: ExternalChoiceReason
-    # Multi-map support: populated only when mapping_category is "MULTI_MAP"
+    is_multi_map: bool = False  # True if ICD9 spans multiple distinct ICD10 concepts
+    # Multi-map support: populated only when is_multi_map is True
     more_broad_icd10_code: Optional[str] = None
     more_broad_icd10_name: Optional[str] = None
     closest_exact_icd10_code: Optional[str] = None
@@ -99,6 +100,7 @@ class MappingResult:
     attempted_returned_name: Optional[str] = None
     salvage_strategy: Optional[str] = None  # e.g., "corrected_confidence", "accepted_valid_code"
     # Multi-map support: when ICD9 maps to multiple ICD10 codes
+    is_multi_map: bool = False
     more_broad_icd10_code: Optional[str] = None
     more_broad_icd10_name: Optional[str] = None
     closest_exact_icd10_code: Optional[str] = None

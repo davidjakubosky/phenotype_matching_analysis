@@ -137,14 +137,15 @@ async def run_all(
                 "mapping_category": r.mapping_category,
                 "match_specificity": r.match_specificity,
                 "external_choice_reason": r.external_choice_reason,
-                "num_attempts": r.num_attempts,
-                "attempted_returned_code": getattr(r, "attempted_returned_code", None),
-                "attempted_returned_name": getattr(r, "attempted_returned_name", None),
-                "salvage_strategy": getattr(r, "salvage_strategy", None),
+                "is_multi_map": getattr(r, "is_multi_map", False),
                 "more_broad_icd10_code": getattr(r, "more_broad_icd10_code", None),
                 "more_broad_icd10_name": getattr(r, "more_broad_icd10_name", None),
                 "closest_exact_icd10_code": getattr(r, "closest_exact_icd10_code", None),
                 "closest_exact_icd10_name": getattr(r, "closest_exact_icd10_name", None),
+                "num_attempts": r.num_attempts,
+                "attempted_returned_code": getattr(r, "attempted_returned_code", None),
+                "attempted_returned_name": getattr(r, "attempted_returned_name", None),
+                "salvage_strategy": getattr(r, "salvage_strategy", None),
             }
         )
     pd.DataFrame(rows).to_csv(csv_path, index=False)
